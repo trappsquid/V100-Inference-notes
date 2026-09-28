@@ -1,0 +1,77 @@
+# Serving playbook: flags and decisions (model-agnostic)
+
+Distilled from the launchers in doc 05 and measurements in this repository. Target hardware: 3 x V100 32 GB (96 GB VRAM total), dual-socket host, one model at a time per port.
+
+## 1. Device selection
+
+- Keep the display GPU out of compute. Pin explicitly, e.g. `CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1,2,3`; verify with `llama-server --list-devices`.
+- Layer split (`-ts 1,1,1 -sm layer`) is the default winner on PCIe-only V100s. Tensor split measured slow on 3 GPUs (allreduce crosses PCIe/inter-socket links).
+- Alternative: `-dev CUDA0,CUDA1,CUDA2 -devd ...` combined with `-ot <tensor pattern>=<device>` when specific tensors must land on specific GPUs (see doc 05 section 6).
+
+## 2. Attention and KV cache
+
+- `-fa on`: works on sm_70 with f16 KV; keep it on.
+- `-ctk f16 -ctv f16`: standard here. A legacy lane used `q8_0` KV to save VRAM; on Volta there is no fast int8 compute path, so treat q8_0 KV as a space-saving fallback, not a speedup.
+- Speculative draft models keep their own caches: `--spec-draft-type-k f16 --spec-draft-type-v f16`.
+
+## 3. Batch sizes
+
+- Dense-ish 27-35B Q8 at np2/np3: `-b 2048 -ub 512` (VRAM-lean) up to `-ub 4096`.
+- Large-context MoE: `-ub 4096` is the measured knee for prefill on this box; prefill scales 615 -> 1118 t/s from ub 512 -> 8192 at +~11 GB/card compute scratch at ub 8192 (ladder in doc 04).
+- Time-to-first-token, 49k-token prompt: 86.6 s (ub 512) -> 50.8 s (ub 4096).
+
+## 4. Context and slots
+
+- `-c` is total; per-slot = `-c / -np`. Shapes used here: 262144/np2, 480000/np3 (160k/slot), 786432/np3 (262k/slot).
+- KV total scales with `-c`; compute scratch scales with per-slot context and `ub`. Budget tables in doc 04.
+
+## 5. Speculative decoding decision table
+
+| Type | Needs | Notes |
+|---|---|---|
+| `draft-mtp` | MTP head -- separate `-md` file or in-model head | Best decoded-side win at low-mid depth (+45% at 2.4k for Qwen3.8-Flash-Next); turned off for Ornith (net -22% at n_max 3) |
+| `draft-dflash` (+ `ngram-map-k`) | draft GGUF (`-md`) | Used for ThinkingCap-27B (n_max 7) |
+| `ngram-*` | nothing | ngram-mod produced 0 drafts on this traffic; ngram-map-k chains with dflash |
+
+- Knobs: `--spec-draft-n-max` (3 typical; 6-7 when drafts are strong), `--spec-draft-n-min 1`, `--spec-draft-p-min` for conservative gating (a legacy lane uses 0.75).
+- Verify token-weighted (doc 03): probe-style acceptance overstates production gains.
+
+## 6. Reasoning flags
+
+Pattern used by all thinking models here:
+
+```
+--reasoning on --reasoning-effort <low|medium|xhigh> --reasoning-preserve --reasoning-format deepseek
+[--reasoning-budget N --reasoning-budget-message "..."]
+```
+
+## 7. Memory and load modes
+
+- `--load-mode dio` (O_DIRECT) standard; `mmap` for smaller models; `none` when the model is expected hot in page cache.
+- `--lazy-mode`: reads large embedding tables on demand -- ~474 MB/s cold from disk, RAM-speed on repeat. Budget system RAM accordingly (~188 GiB here; ~123 GiB observed in page cache at steady state).
+- Oversized MoE: `-ot exps=CPU` + `--numa distribute` + `--moe-cache on` (DeepSeek-V4-Flash reference in doc 05). CPU-side MoE is DDR4-bandwidth-bound: ~105 t/s prefill / ~16 t/s decode observed.
+- Launchers set `-fit off` and size VRAM explicitly with the flags above.
+
+## 8. Ops pattern
+
+- One model per port; swap = stop old instance, start new instance, wait for `/health` (60-90 s load for these sizes), then verify VRAM and the `n_slots` line in the log.
+- Give every model instance a distinct unit name -- a stale shared name can make a health-wait latch onto a different instance (doc 03).
+- `--metrics` on every instance for token/latency counters.
+
+## 9. Sampling presets used
+
+| Model family | temp | top-p | top-k | extra |
+|---|---|---|---|---|
+| Qwen3.8-Flash-Next (thinking) | 1.0 | 0.95 | 20 | -- |
+| Ornith-1.5-35B-A3B | 1.0 | 0.95 | 20 | -- |
+| Qwen3.8-35B-A3B-Distill | 0.6 | 0.95 | 20 | -- |
+| Qwythos-9B | 0.6 | 0.95 | 20 | repeat-penalty 1.05 |
+| ThinkingCap-27B | 1.0 | 0.95 | 20 | effort xhigh |
+
+Values come from model cards / GGUF metadata where present; launchers pass them explicitly.
+
+## 10. Vision (mmproj)
+
+- Load `--mmproj <projector.gguf>`; f16/BF16 projectors add ~1.1 GB per instance.
+- `--image-min-tokens 1024` used across launchers.
+- Verified working on sm_70 (clip-style projector on V100); keep the display GPU out of the split as usual.
