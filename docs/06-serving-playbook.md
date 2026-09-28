@@ -75,3 +75,14 @@ Values come from model cards / GGUF metadata where present; launchers pass them 
 - Load `--mmproj <projector.gguf>`; f16/BF16 projectors add ~1.1 GB per instance.
 - `--image-min-tokens 1024` used across launchers.
 - Verified working on sm_70 (clip-style projector on V100); keep the display GPU out of the split as usual.
+
+## 11. Prefix caching and LAN clients
+
+- Prompt caching is ON by default (`--cache-prompt`); the cache is per slot and hits require a byte-stable prompt prefix (system prompt + tool schemas + history matching from position 0).
+- Instrumentation: response `timings.cache_n` = tokens served from cache, `timings.prompt_n` = tokens actually evaluated. Measured example on the reference box: identical follow-up request reused 422 / 426 tokens (wall 1.82 s -> 0.14 s).
+- Prompt-cache budget: `--cache-ram` (upstream default 8192 MiB; launchers here set 16384 MiB). Idle slots park in this host-RAM cache (`--cache-idle-slots`, default on) and are restored for later tasks; a larger budget retains more prefixes across clients.
+- `--cache-reuse` (interior-chunk reuse via KV shifting; upstream default 0): **unavailable under multimodal** -- with an mmproj loaded the server force-disables `cache_reuse` and `ctx_shift` at startup. These launchers run vision, so it stays unset; text-only runs may add `--cache-reuse 256` (value: reuse of non-prefix shared chunks, e.g. clients that truncate mid-history).
+- Context overflow: `--context-shift` is disabled by default (and under multimodal); clients manage conversation length themselves; the per-slot `-c` value is the hard budget.
+- Cold start: caches are empty after a restart or model swap. A fixed known prefix can be pushed with a small prewarm script after restart so the first real turn skips cold prefill.
+- Optional: `--slot-save-path` plus `/slots` API `save`/`restore` persist individual slot caches to disk (manual; not enabled here).
+- Already on everywhere: SSE keep-alive pings (`--sse-ping-interval 30`), `--metrics`, `/slots` monitoring, `return_progress` streaming, `--timeout` 3600 s.
