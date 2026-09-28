@@ -1,0 +1,23 @@
+diff --git a/exllamav3/modules/quant/exl3.py b/exllamav3/modules/quant/exl3.py
+index 41b1ef6..c9d82f8 100644
+--- a/exllamav3/modules/quant/exl3.py
++++ b/exllamav3/modules/quant/exl3.py
+@@ -93,7 +93,6 @@ class LinearEXL3:
+         # (observed as an IMA at the tiled m>1 launch). Size it for the
+         # kernel's max M; the m==1 path wastes 7 rows of scratch.
+         self.bsz1_xh_args = (self.trellis.device, (8, self.in_features), self.out_dtype)
+-        self.bsz1_xh_args = (self.trellis.device, (1, self.in_features), self.out_dtype)
+         # K is the bitrate (int, or float for the half-integer rates); the C++ side decomposes it
+         self.bc = ext.BC_LinearEXL3(
+             self.trellis,
+@@ -157,8 +156,8 @@ class LinearEXL3:
+                 # K > 4 on sm70: the GEMV kernel now covers K 5-8 (SMEM
+                 # decode); exl3_gemm_gr's reconstruct+hgemm fallback catches
+                 # whatever the GEMV declines (large M). No special routing.
+-                if rows > 2 and cc < 8:
+-                    pass  # fall through to reconstruct_hgemm
++                if rows > 8 and cc < 8:
++                    pass  # fall through to reconstruct_hgemm (GEMV covers m <= 8)
+                 else:
+                     dtype = out_dtype or self.default_out_dtype
+                     return self.bc.run_alloc(x, self.out_features, dtype == torch.float)

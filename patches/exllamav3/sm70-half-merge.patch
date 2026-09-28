@@ -1,0 +1,119 @@
+diff --git a/exllamav3/exllamav3_ext/quant/exl3_gemm.cu b/exllamav3/exllamav3_ext/quant/exl3_gemm.cu
+index 11df19b..c306a72 100644
+--- a/exllamav3/exllamav3_ext/quant/exl3_gemm.cu
++++ b/exllamav3/exllamav3_ext/quant/exl3_gemm.cu
+@@ -289,7 +289,7 @@ int exl3_gemm_gr
+                 void* tile_kernel = nullptr;
+                 all_ok = exl3_gemv_try_launch
+                 (
+-                    tileArgs, tile_rows, size_k, size_n, K, cb, c_fp32,
++                    tileArgs, tile_rows, size_k, size_n, K, half_k, cb, c_fp32,
+                     suh_ptr && A_had_ptr && svh_ptr,
+                     device, stream, &tile_kernel, true
+                 );
+diff --git a/exllamav3/exllamav3_ext/quant/exl3_gemv.cu b/exllamav3/exllamav3_ext/quant/exl3_gemv.cu
+index 62e42b6..a783c9f 100644
+--- a/exllamav3/exllamav3_ext/quant/exl3_gemv.cu
++++ b/exllamav3/exllamav3_ext/quant/exl3_gemv.cu
+@@ -183,6 +183,7 @@ bool exl3_gemv_try_launch
+     int size_k,
+     int size_n,
+     int K,
++    bool half_k,
+     int cb,
+     bool c_fp32,
+     bool has_su_sv,
+@@ -195,9 +196,20 @@ bool exl3_gemv_try_launch
+     // Free integer checks first; the env read (~64 ns) and device queries only run for calls
+     // that could actually take this path
+     if (!has_su_sv) return false;
+-    if (K < 2 || K > 8) return false;
+-    if (K > 4 && DevCtx::instance().get_cc(device) >= CC_AMPERE) return false;  // sm70 kernel covers K=5-8
+-    if (K != 4 && cb == 0 && DevCtx::instance().get_cc(device) >= CC_AMPERE) return false;  // sm70 kernel supports K=2,3 cb=0
++    if (half_k)
++    {
++        // Half-integer rates (1.5/2.5/3.5 bpw): mul1 codebook only. No sm_70 kernel
++        // instances exist yet (the half instances are the generic-mma family), so
++        // decline below cc 8 until sm70 half kernels land.
++        if (K < 1 || K > 3 || cb != 2) return false;
++        if (DevCtx::instance().get_cc(device) < CC_AMPERE) return false;
++    }
++    else
++    {
++        if (K < 2 || K > 8) return false;
++        if (K > 4 && DevCtx::instance().get_cc(device) >= CC_AMPERE) return false;  // sm70 kernel covers K=5-8
++        if (K != 4 && cb == 0 && DevCtx::instance().get_cc(device) >= CC_AMPERE) return false;  // sm70 kernel supports K=2,3 cb=0
++    }
+     if (size_m > EXL3_GEMV_MAX_M) return false;
+     if (size_k % 128 || size_n % 128) return false;
+ 
+@@ -231,26 +243,21 @@ bool exl3_gemv_try_launch
+ 
+     // sm_70 and older: the sm80 mma kernels are no-ops (arch-guarded) —
+     // route to the m8n8k4 variant, which shares the launch signature.
+-    void* narrow_kernel;
+-    if (cc < CC_AMPERE)
+-    {
+-        narrow_kernel = exl3_gemv_sm70_select_kernel(K, cb, c_fp32, mmode, 0, smem);
+-    }
+-    else
++    auto select = [&] (int cfg_) -> void*
+     {
+-        narrow_kernel = exl3_gemv_select_kernel(K, cb, c_fp32, mmode, 0, smem);
+-    }
++        if (half_k) return exl3_gemv_select_kernel_half(K, c_fp32, mmode, cfg_, smem);
++        return cc < CC_AMPERE ? exl3_gemv_sm70_select_kernel(K, cb, c_fp32, mmode, cfg_, smem)
++                              : exl3_gemv_select_kernel(K, cb, c_fp32, mmode, cfg_, smem);
++    };
++    void* narrow_kernel = select(0);
+     if (!narrow_kernel) return false;
+     int narrow_coresident = occupancy(narrow_kernel, 512) * num_sms;
+ 
+-    int cfg = exl3_gemv_cfg(cc, size_m, size_k, size_n, K, cb, mode, narrow_coresident);
++    // Half rates ride the integer-rate envelope above them (unmeasured: K + 1)
++    int cfg = exl3_gemv_cfg(cc, size_m, size_k, size_n, half_k ? K + 1 : K, cb, mode, narrow_coresident);
+     if (cfg < 0) return false;
+ 
+-    void* kernel = nullptr;
+-    if (cc < CC_AMPERE)
+-        kernel = cfg == 0 ? narrow_kernel : exl3_gemv_sm70_select_kernel(K, cb, c_fp32, mmode, cfg, smem);
+-    else
+-        kernel = cfg == 0 ? narrow_kernel : exl3_gemv_select_kernel(K, cb, c_fp32, mmode, cfg, smem);
++    void* kernel = cfg == 0 ? narrow_kernel : select(cfg);
+     if (!kernel) return false;
+ 
+     int block_dim = cfg == 1 ? 256 : 512;
+@@ -331,7 +338,10 @@ void exl3_gemv
+     for (int d = 0; d < dim - 1; ++d) size_m *= A.size(d);
+     int size_k = A.size(-1);
+     int size_n = B.size(1) * 16;
+-    int K = B.size(2) / 16;
++    const int tile_u16 = B.size(2);
++    const bool half_k = (tile_u16 % 16) != 0;
++    int K = tile_u16 / 16;
++    TORCH_CHECK(!half_k || (tile_u16 % 16 == 8 && mul1), "exl3_gemv: half-integer bitrates require the mul1 codebook");
+ 
+     int cb = 0;
+     if (mcg) cb = 1;
+@@ -363,7 +373,7 @@ void exl3_gemv
+ 
+     bool ok = exl3_gemv_try_launch
+     (
+-        kernel_args, size_m, size_k, size_n, K, cb, c_fp32,
++        kernel_args, size_m, size_k, size_n, K, half_k, cb, c_fp32,
+         true, device, stream, nullptr, true
+     );
+     TORCH_CHECK(ok, "exl3_gemv: call is not eligible for the GEMV kernel");
+diff --git a/exllamav3/exllamav3_ext/quant/exl3_gemv_int8.cu b/exllamav3/exllamav3_ext/quant/exl3_gemv_int8.cu
+index 3599f1c..f9dcfcb 100644
+--- a/exllamav3/exllamav3_ext/quant/exl3_gemv_int8.cu
++++ b/exllamav3/exllamav3_ext/quant/exl3_gemv_int8.cu
+@@ -261,8 +261,6 @@ bool exl3_gemv_int8
+         if (DevCtx::instance().get_cc(device_) < CC_AMPERE) return false;
+     }
+ 
+-    int K = B.size(2) / 16;
+-
+     // 16 * K uint16 per tile, 16 * K + 8 at the half-integer rates (mul1 only, which this path is anyway)
+     const int tile_u16 = B.size(2);
+     const bool half_k = (tile_u16 % 16) != 0;
