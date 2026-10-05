@@ -64,7 +64,7 @@ Best measured per stack, same model family (Qwen3.8-Flash-Next). Per-model numbe
 
 | Stack | Setup | Decode t/s (short / long fill) | Prompt read t/s | Details |
 |---|---|---|---|---|
-| **Strata** (v0.1.39) | uncensored IQ4_XS, all-resident (best quant measured) | 85.3 @2.5k / 81.8 @18k | 707 -> 1,772 | [doc 07](docs/07-strata-sm70.md) |
+| **Strata** (v0.1.39) | uncensored IQ4_XS, all-resident (fastest deployment measured) | 85.3 @2.5k / 81.8 @18k | 707 -> 1,772 | [doc 07](docs/07-strata-sm70.md) |
 | llama.cpp (qwen4exp fork) + MTP | GSQ-RCO IQ3_XXS, production shape; bench arm 56.8 @2.4k | 55.2 @2.4k / 48.9 @19.5k | 339-425 | [doc 01](docs/01-mtp-speculative-decode-sm70.md) |
 | llama.cpp, no speculation | control, same binary | 38.97 @2.4k / -- | (same) | [doc 01](docs/01-mtp-speculative-decode-sm70.md) |
 | exllamav3 | best sm_70 build | 16.15 @2k / 14.32 | not recorded | [doc 02](docs/02-exllamav3-sm70.md) |
