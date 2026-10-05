@@ -38,6 +38,8 @@ strata --serve --pack <pack-dir>
   --vision --vram-reserve-mib 700
 ```
 
+Per-model sanitized startup configs (all three deployments, with the runner and every flag): doc 05 §8.
+
 - **Device mask**: `--gpu 1,2,3` under `CUDA_DEVICE_ORDER=PCI_BUS_ID`. The display GPU (P400, sm_61) enumerates last and must stay out of the mask -- on any engine, the same masking rule as doc 06.
 - **Layer split**: pinned explicitly (`--trim-stage-weights` requires it); byte-balanced by summing per-layer `*_exps` tensor bytes from the GGUF header (`22,45` for the 2-shard IQ3_XXS layout; `14,31` for the single-file IQ4_XS and the 6-shard Q8_0).
 - **KV**: int8 with 32,768 resident cells, the rest streams to RAM; 262144 total context (native).

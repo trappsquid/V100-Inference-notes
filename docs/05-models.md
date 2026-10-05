@@ -22,7 +22,25 @@ Shared conventions: `-ngl 999` (all layers on GPU), `-ts 1,1,1` (even 3-way laye
 
 - Files: IQ3_XXS 2-shard GGUF + BF16 mmproj (~107 GB total), MTP head GGUF (Q4_K_M, ~2.5 GB; Q8_0 head ~4.1 GB for reduced-context use).
 - Engine: llama.cpp fork with qwen4exp MTP support (doc 01 / attached patch).
-- Config: `-c 262144 -np 2 -b 4096 -ub 4096`, `--load-mode none`, `--numa distribute`, `--spec-type draft-mtp --spec-draft-n-max 3`, vision via mmproj, reasoning medium, temp 1.0 / top-p 0.95 / top-k 20.
+- Config:
+
+```
+llama-server -m <model-IQ3_XXS-00001-of-00002.gguf>
+  --mmproj <mmproj-Qwen3.8-Flash-Next-BF16.gguf> --image-min-tokens 1024
+  --alias main -ngl 999 -ts 1,1,1 -sm layer
+  -c 262144 -np 2 -b 4096 -ub 4096
+  -fa on -ctk f16 -ctv f16
+  --lazy-mode on --load-mode none --numa distribute
+  -md <mtp-head-Q4_K_M.gguf>
+  --spec-type draft-mtp --spec-draft-n-max 3 --spec-draft-p-min 0.0
+  --jinja --chat-template-file <qwen-fixed-v22.5.jinja>
+  --reasoning on --reasoning-effort medium --reasoning-preserve --reasoning-format deepseek
+  --temp 1.0 --top-p 0.95 --top-k 20
+  --metrics
+  --host 0.0.0.0 --port 8081
+```
+
+- Environment: `LLAMA_ATTN_ROT_DISABLE=1` (QSA indexer requirement on this architecture); no `-ot` override (the PLE tensor is lazy-host by construction).
 
 Measured (campaign, doc 03 protocol):
 
@@ -90,7 +108,7 @@ Acceptance ~70-76%; mean accepted length ~3.1-3.3 probe / ~2.6 token-weighted pr
     --temp 1.0 --top-p 0.95 --top-k 20
 ```
 
-- Observed in service: ~45.7 t/s decode (81-token sample). Effort preset: xhigh.
+- Observed in service: ~45.7 t/s decode (81-token sample); prompt processing ~432 t/s (990-token sample), ~760-830 t/s at ~13k fills. Effort preset: xhigh.
 
 ## 5. Qwythos-9B (Claude-Mythos-5, 1M-context line) -- Q8_0 + MTP
 
@@ -129,6 +147,7 @@ Acceptance ~70-76%; mean accepted length ~3.1-3.3 probe / ~2.6 token-weighted pr
 ```
 
 - Superseded by the master-build daily (doc 01); kept for the placement / q8_0-KV patterns.
+- Prompt processing: not recorded.
 
 ## 7. DeepSeek-V4-Flash -- Q4_K, MoE experts on CPU (parked)
 
@@ -148,10 +167,158 @@ Acceptance ~70-76%; mean accepted length ~3.1-3.3 probe / ~2.6 token-weighted pr
 
 A second serving stack for the same Qwen3.8-Flash-Next family, holder of :8081 since 2026-10-04: Strata keeps experts across VRAM + RAM and streams the PLE n-gram table from SSD. Full setup, posture and PLE findings in doc 07. Deployments, newest first:
 
-| Model / quant | Size | Decode | Notes |
-|---|---|---|---|
-| Abliterated Q8_0 (6 shards) | ~189 GB | 72.5 @2.4k; 66.0 @20k fill | served now (spill test, 67% residency); needs patches/strata/ |
-| Uncensored IQ4_XS (single file) | 92 GB | 85.3 @2.5k; ~82 @18k fill | all-resident; fastest decode measured on this box |
-| GSQ-RCO IQ3_XXS (2 shards) | ~107 GB | 77.6 @2.0k; 73.9 @17k fill | first Strata deployment, 2026-10-04 |
+| Model / quant | Size | Decode | Prompt read | Notes |
+|---|---|---|---|---|
+| Abliterated Q8_0 (6 shards) | ~189 GB | 72.5 @2.4k; 66.0 @20k fill | 458 -> 1,578 | served now (spill test, 67% residency); needs patches/strata/ |
+| Uncensored IQ4_XS (single file) | 92 GB | 85.3 @2.5k; ~82 @18k fill | 707 -> 1,772 | all-resident; fastest decode measured on this box |
+| GSQ-RCO IQ3_XXS (2 shards) | ~107 GB | 77.6 @2.0k; 73.9 @17k fill | 656 -> 1,158 | first Strata deployment, 2026-10-04 |
 
 For scale, the llama.cpp production lane above runs 55.2 @2.4k fill / 48.9 @19.5k.
+
+Startup (engine v0.1.39 + `patches/strata/`; `<strata-repo>` = engine checkout, `<strata-data>` = pack/MTP data dir, `<models-dir>` = GGUF root):
+
+```
+cd <strata-repo>
+export STRATA_NO_LARGEPAGES=1        # host-arena load fix on v0.1.39
+export STRATA_VERIFY_ALL_RESIDENT=0  # 2-slot batch on an all-resident split
+exec .venv/bin/python serve/server.py --engine strata --config <config>.json --port 8081 --open
+```
+
+Config per deployment (sanitized; the three files differ only in the pack/model paths, `--ple-gguf`, `layer_split`, `model_name`, `log`, and the vision block):
+
+### 8.1 Abliterated Q8_0 -- `strata-huihui-q8_0.json`
+
+```json
+{
+ "exe": "<strata-repo>/engine/strata",
+ "args": [
+  "--pack", "<strata-data>/packs/huihui-q8_0",
+  "--native", "<models-dir>/Huihui-Qwen3.8-Flash-Next-abliterated/Q8_0/Qwen3.8-Flash-Next-Q8_0-00001-of-00006.gguf",
+  "--expert-profile", "<strata-repo>/data/expert-profile.bin",
+  "--expert-cache", "auto",
+  "--prefill", "auto",
+  "--spec", "4",
+  "--spec-min-p", "0.5",
+  "--mtp", "<strata-data>/mtp/rt",
+  "--max-context", "262144",
+  "--kv", "int8",
+  "--kv-resident", "32768",
+  "--batch", "2",
+  "--batch-groups", "2",
+  "--trim-stage-weights",
+  "--vision",
+  "--vram-reserve-mib", "700"
+ ],
+ "cwd": "<strata-repo>",
+ "tokenizer": "<strata-data>/packs/huihui-q8_0/tokenizer",
+ "model_name": "qwen3.8-flash-next-abliterated-q8_0",
+ "log": "<strata-repo>/strata-huihui-q8_0.log",
+ "lib_dirs": ["/usr/local/cuda-12.8/bin", "/usr/local/cuda-12.8/lib64"],
+ "port": 8081,
+ "host": "0.0.0.0",
+ "fit_max_tokens": true,
+ "aliases": ["main"],
+ "gpu": [1, 2, 3],
+ "gpus_asked": true,
+ "layer_split": "14,31",
+ "vision": {
+  "exe": "<strata-repo>/engine/strata-vision",
+  "mmproj": "<models-dir>/Huihui-Qwen3.8-Flash-Next-abliterated/mmproj-model-bf16.gguf",
+  "model": "<models-dir>/Huihui-Qwen3.8-Flash-Next-abliterated/Q8_0/Qwen3.8-Flash-Next-Q8_0-00001-of-00006.gguf",
+  "gpu": true,
+  "max_tokens": 1024
+ }
+}
+```
+
+### 8.2 Uncensored IQ4_XS -- `strata-orca-iq4_xs.json`
+
+```json
+{
+ "exe": "<strata-repo>/engine/strata",
+ "args": [
+  "--pack", "<strata-data>/packs/orca-iq4_xs",
+  "--native", "<models-dir>/Qwen3.8-Flash-Next-Uncensored.IQ4_XS.gguf",
+  "--ple-gguf", "<models-dir>/Qwen3.8-Flash-Next-Uncensored.IQ4_XS.gguf",
+  "--expert-profile", "<strata-repo>/data/expert-profile.bin",
+  "--expert-cache", "auto",
+  "--prefill", "auto",
+  "--spec", "4",
+  "--spec-min-p", "0.5",
+  "--mtp", "<strata-data>/mtp/rt",
+  "--max-context", "262144",
+  "--kv", "int8",
+  "--kv-resident", "32768",
+  "--batch", "2",
+  "--batch-groups", "2",
+  "--trim-stage-weights",
+  "--vision",
+  "--vram-reserve-mib", "700"
+ ],
+ "cwd": "<strata-repo>",
+ "tokenizer": "<strata-data>/packs/orca-iq4_xs/tokenizer",
+ "model_name": "qwen3.8-flash-next-uncensored-iq4_xs",
+ "log": "<strata-repo>/strata-orca-iq4_xs.log",
+ "lib_dirs": ["/usr/local/cuda-12.8/bin", "/usr/local/cuda-12.8/lib64"],
+ "port": 8081,
+ "host": "0.0.0.0",
+ "fit_max_tokens": true,
+ "aliases": ["main"],
+ "gpu": [1, 2, 3],
+ "gpus_asked": true,
+ "layer_split": "14,31",
+ "vision": {
+  "exe": "<strata-repo>/engine/strata-vision",
+  "mmproj": "<models-dir>/Qwen3.8-Flash-Next-Uncensored/Qwen3.8-Flash-Next-Uncensored.mmproj-f16.gguf",
+  "model": "<models-dir>/Qwen3.8-Flash-Next-Uncensored.IQ4_XS.gguf",
+  "gpu": true,
+  "max_tokens": 1024
+ }
+}
+```
+
+### 8.3 GSQ-RCO IQ3_XXS -- `strata-iq3_xxs.json`
+
+```json
+{
+ "exe": "<strata-repo>/engine/strata",
+ "args": [
+  "--pack", "<strata-data>/packs/iq3_xxs",
+  "--native", "<models-dir>/Qwen3.8-Flash-Next-GSQ-RCO/IQ3_XXS/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+  "--ple-gguf", "<models-dir>/Qwen3.8-Flash-Next-GSQ-RCO/IQ3_XXS/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf",
+  "--expert-profile", "<strata-repo>/data/expert-profile.bin",
+  "--expert-cache", "auto",
+  "--prefill", "auto",
+  "--spec", "4",
+  "--spec-min-p", "0.5",
+  "--mtp", "<strata-data>/mtp/rt",
+  "--max-context", "262144",
+  "--kv", "int8",
+  "--kv-resident", "32768",
+  "--batch", "2",
+  "--batch-groups", "2",
+  "--trim-stage-weights",
+  "--vision",
+  "--vram-reserve-mib", "700"
+ ],
+ "cwd": "<strata-repo>",
+ "tokenizer": "<strata-data>/packs/iq3_xxs/tokenizer",
+ "model_name": "qwen3.8-flash-next-iq3_xxs",
+ "log": "<strata-repo>/strata-iq3_xxs.log",
+ "lib_dirs": ["/usr/local/cuda-12.8/bin", "/usr/local/cuda-12.8/lib64"],
+ "port": 8081,
+ "host": "0.0.0.0",
+ "fit_max_tokens": true,
+ "aliases": ["main"],
+ "gpu": [1, 2, 3],
+ "gpus_asked": true,
+ "layer_split": "22,45",
+ "vision": {
+  "exe": "<strata-repo>/engine/strata-vision",
+  "mmproj": "<models-dir>/Qwen3.8-Flash-Next-GSQ-RCO/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+  "model": "<models-dir>/Qwen3.8-Flash-Next-GSQ-RCO/IQ3_XXS/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+  "gpu": true,
+  "max_tokens": 1024
+ }
+}
+```
