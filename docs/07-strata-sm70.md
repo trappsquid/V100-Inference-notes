@@ -6,6 +6,8 @@ Deployments on this box, in order: GSQ-RCO IQ3_XXS (2026-10-04, 2- and 3-card), 
 
 Fill depths are stated with every number; protocol per doc 03. One model at a time on :8081, same as the other lanes.
 
+**Sections:** [Measured results](#measured-results) · [Serving posture](#serving-posture) · [Flag reference](#flag-reference-every-field-in-the-startup-configs) · [PLE n-gram table](#ple-n-gram-table-read-path-and-encodings) · [Negative results and limits](#negative-results-and-limits) · [Patches](#patches)
+
 ## Measured results
 
 | Model / quant | Expert residency | Decode @ short | Decode @ long | Prompt read | Spec accept |
@@ -38,7 +40,7 @@ strata --serve --pack <pack-dir>
   --vision --vram-reserve-mib 700
 ```
 
-Per-model sanitized startup configs (all three deployments, with the runner and every flag): doc 05 §8.
+Per-model sanitized startup configs (all three deployments, with the runner and every flag): [doc 05 §8](05-models.md#8-strata-lane-separate-engine----current-8081-stack).
 
 - **Device mask**: `--gpu 1,2,3` under `CUDA_DEVICE_ORDER=PCI_BUS_ID`. The display GPU (P400, sm_61) enumerates last and must stay out of the mask -- on any engine, the same masking rule as doc 06.
 - **Layer split**: pinned explicitly (`--trim-stage-weights` requires it); byte-balanced by summing per-layer `*_exps` tensor bytes from the GGUF header (`22,45` for the 2-shard IQ3_XXS layout; `14,31` for the single-file IQ4_XS and the 6-shard Q8_0).

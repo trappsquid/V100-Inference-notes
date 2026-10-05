@@ -1,6 +1,8 @@
 # Serving playbook: flags and decisions (model-agnostic)
 
-Distilled from the launchers in doc 05 and measurements in this repository. Target hardware: 3 x V100 32 GB (96 GB VRAM total), dual-socket host, one model at a time per port.
+Distilled from the launchers in [doc 05](05-models.md) and measurements in this repository. Target hardware: 3 x V100 32 GB (96 GB VRAM total), dual-socket host, one model at a time per port.
+
+**Sections:** [1. Device selection](#1-device-selection) · [2. Attention & KV cache](#2-attention-and-kv-cache) · [3. Batch sizes](#3-batch-sizes) · [4. Context & slots](#4-context-and-slots) · [5. Speculative decoding](#5-speculative-decoding-decision-table) · [6. Reasoning flags](#6-reasoning-flags) · [7. Memory & load modes](#7-memory-and-load-modes) · [8. Ops pattern](#8-ops-pattern) · [9. Sampling presets](#9-sampling-presets-used) · [10. Vision](#10-vision-mmproj) · [11. Prefix caching](#11-prefix-caching-and-lan-clients) · [12. Glossary](#12-glossary-what-every-flag-in-the-launchers-does)
 
 ## 1. Device selection
 

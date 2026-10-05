@@ -1,8 +1,10 @@
 # Models: tested serving configurations
 
-Snapshot: 2026-10. Served one at a time on port 8081 from the reference workstation (see README); display GPU excluded via `CUDA_VISIBLE_DEVICES`; layer split across the three V100s unless noted. Flag blocks are the actual serving configurations with local paths collapsed. Sections 1-7 are the llama.cpp lanes; section 8 is the Strata lane -- the current :8081 stack. Flag meanings: doc 06 §12 (llama.cpp) and doc 07 (Strata).
+Snapshot: 2026-10. Served one at a time on port 8081 from the reference workstation (see README); display GPU excluded via `CUDA_VISIBLE_DEVICES`; layer split across the three V100s unless noted. Flag blocks are the actual serving configurations with local paths collapsed. Sections 1-7 are the llama.cpp lanes; section 8 is the Strata lane -- the current :8081 stack. Flag meanings: [doc 06 §12](06-serving-playbook.md#12-glossary-what-every-flag-in-the-launchers-does) (llama.cpp) and [doc 07](07-strata-sm70.md) (Strata).
 
 Decode rates marked "(sample)" are the last completed task in that model's server log at write time -- fill depths vary; campaign numbers follow the protocol in doc 03.
+
+**Sections:** [1. GSQ-RCO](#1-qwen38-flash-next-gsq-rco----llamacpp-daily-driver-lane) · [2. Distill](#2-qwen38-35b-a3b-distill----q8_0--vision--mtp) · [3. Ornith](#3-ornith-15-35b-a3b----q8_0--vision) · [4. ThinkingCap](#4-thinkingcap-qwen38-27b----q8_0--dflash2-draft--vision) · [5. Qwythos](#5-qwythos-9b-claude-mythos-5-1m-context-line----q8_0--mtp) · [6. Uncensored IQ4_XS (legacy)](#6-qwen38-flash-next-uncensored----iq4_xs-legacy-lane) · [7. DeepSeek-V4](#7-deepseek-v4-flash----q4_k-moe-experts-on-cpu-parked) · [8. Strata lane](#8-strata-lane-separate-engine----current-8081-stack)
 
 ## Common pattern
 
@@ -42,7 +44,7 @@ llama-server -m <model-IQ3_XXS-00001-of-00002.gguf>
 
 - Environment: `LLAMA_ATTN_ROT_DISABLE=1` (QSA indexer requirement on this architecture); no `-ot` override (the PLE tensor is lazy-host by construction).
 
-Measured (campaign, doc 03 protocol):
+Measured (campaign, doc 03 protocol; full arms in [doc 01](01-mtp-speculative-decode-sm70.md)):
 
 | Arm | @2.4k fill | @19.5k fill |
 |---|---|---|
@@ -165,13 +167,13 @@ Acceptance ~70-76%; mean accepted length ~3.1-3.3 probe / ~2.6 token-weighted pr
 
 ## 8. Strata lane (separate engine) -- current :8081 stack
 
-A second serving stack for the same Qwen3.8-Flash-Next family, holder of :8081 since 2026-10-04: Strata keeps experts across VRAM + RAM and streams the PLE n-gram table from SSD. Full setup, posture and PLE findings in doc 07. Deployments, newest first:
+A second serving stack for the same Qwen3.8-Flash-Next family, holder of :8081 since 2026-10-04: Strata keeps experts across VRAM + RAM and streams the PLE n-gram table from SSD. Full setup, posture and PLE findings in [doc 07](07-strata-sm70.md). Deployments, newest first:
 
 | Model / quant | Size | Decode | Prompt read | Notes |
 |---|---|---|---|---|
-| Abliterated Q8_0 (6 shards) | ~189 GB | 72.5 @2.4k; 66.0 @20k fill | 458 -> 1,578 | served now (spill test, 67% residency); needs patches/strata/ |
-| Uncensored IQ4_XS (single file) | 92 GB | 85.3 @2.5k; ~82 @18k fill | 707 -> 1,772 | all-resident; fastest decode measured on this box |
-| GSQ-RCO IQ3_XXS (2 shards) | ~107 GB | 77.6 @2.0k; 73.9 @17k fill | 656 -> 1,158 | first Strata deployment, 2026-10-04 |
+| [Abliterated Q8_0 (6 shards)](#81-abliterated-q8_0----strata-huihui-q8_0json) | ~189 GB | 72.5 @2.4k; 66.0 @20k fill | 458 -> 1,578 | served now (spill test, 67% residency); needs [patches/strata/](../patches/strata/) |
+| [Uncensored IQ4_XS (single file)](#82-uncensored-iq4_xs----strata-orca-iq4_xsjson) | 92 GB | 85.3 @2.5k; ~82 @18k fill | 707 -> 1,772 | all-resident; fastest decode measured on this box |
+| [GSQ-RCO IQ3_XXS (2 shards)](#83-gsq-rco-iq3_xxs----strata-iq3_xxsjson) | ~107 GB | 77.6 @2.0k; 73.9 @17k fill | 656 -> 1,158 | first Strata deployment, 2026-10-04 |
 
 For scale, the llama.cpp production lane above runs 55.2 @2.4k fill / 48.9 @19.5k.
 
