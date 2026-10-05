@@ -143,3 +143,7 @@ Acceptance ~70-76%; mean accepted length ~3.1-3.3 probe / ~2.6 token-weighted pr
 
 - Observed in service: ~15.9 t/s decode, ~104.9 t/s prompt processing (experts on CPU, DDR4-bandwidth-bound; see doc 00).
 - Parked -- model files relocated; launcher retained as reference.
+
+## 8. Strata lane (separate engine)
+
+A second serving stack for the same Qwen3.8-Flash-Next family: the Strata engine holds experts across VRAM + RAM and streams the PLE n-gram table from SSD. Best measured decode 85.3 t/s @2.5k fill (uncensored IQ4_XS, all-resident) vs 55.2 for the llama.cpp production lane above; configs, PLE n-gram findings and limits in doc 07.

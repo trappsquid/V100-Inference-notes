@@ -1,0 +1,17 @@
+diff --git a/src/core/native_dense.cpp b/src/core/native_dense.cpp
+index e0609fd..dffe5e6 100644
+--- a/src/core/native_dense.cpp
++++ b/src/core/native_dense.cpp
+@@ -99,7 +99,11 @@ bool NativeDense::load(const std::vector<std::string>& shards, WeightTable& tabl
+             const auto* count = gguf.get("split.count");
+             const auto* number = gguf.get("split.no");
+             const auto* tensors = gguf.get("split.tensors.count");
+-            if (gguf.get("general.architecture")) {
++            // Only the metadata shard (the first of a split, or a whole file) is architecture-validated:
++            // a split writer may reduce the metadata of later shards to split.* alone while leaving
++            // general.architecture in every shard.
++            const bool metadata_shard = number == nullptr || number->u == 0;
++            if (gguf.get("general.architecture") && metadata_shard) {
+                 err = strata::check_architecture(gguf);
+                 if (!err.empty()) return false;
+                 have_architecture = true;

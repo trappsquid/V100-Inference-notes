@@ -13,11 +13,11 @@ Measured notes from a 3 x Tesla V100 (sm_70) workstation running large language 
 | RAM | ~188 GiB ECC DDR4 (two sockets, ~94 GiB per NUMA node) |
 | Storage | SATA SSDs; models on a 932 GB NTFS volume + a 400 GB ext4 LVM volume |
 | CUDA | 12.8 (ceiling for sm_70: CUDA <= 12.x; CUDA 13 removed Volta) |
-| Serving | llama.cpp fork builds (master + qwen4exp MTP stack, see patches/) and exllamav3 fork experiments. One model at a time on :8081. |
+| Serving | llama.cpp fork builds (master + qwen4exp MTP stack, see patches/), exllamav3 fork experiments, and the Strata engine for Qwen3.8-Flash-Next (doc 07, patches/strata/). One model at a time on :8081. |
 
 ## Models in rotation
 
-Snapshot 2026-09. Decode rates without a fill depth are in-service log samples (see doc 05); campaign numbers follow the protocol in doc 03.
+Snapshot 2026-09. Decode rates without a fill depth are in-service log samples (see doc 05); campaign numbers follow the protocol in doc 03. A separate Strata lane for the same Qwen3.8-Flash-Next family ran on these cards in 2026-10 (doc 07).
 
 | Model | Quant | Size | Context / slots | Spec decode | Decode t/s | Status |
 |---|---|---|---|---|---|---|
@@ -40,6 +40,7 @@ Snapshot 2026-09. Decode rates without a fill depth are in-service log samples (
 | [docs/04-workstation-config-tables.md](docs/04-workstation-config-tables.md) | Config tables: KV, micro-batch, device enumeration, expected fallbacks |
 | [docs/05-models.md](docs/05-models.md) | Per-model serving configurations and results |
 | [docs/06-serving-playbook.md](docs/06-serving-playbook.md) | Flag reference and decisions (model-agnostic) |
+| [docs/07-strata-sm70.md](docs/07-strata-sm70.md) | Strata engine on sm_70: setup, measured results, PLE n-gram table findings, limits |
 
 ## Patches
 
@@ -49,6 +50,8 @@ Snapshot 2026-09. Decode rates without a fill depth are in-service log samples (
 | [patches/exllamav3/sm70-all-local-changes.patch](patches/exllamav3/sm70-all-local-changes.patch) | exllamav3: aggregate sm_70 changes (GEMV / GEMV-int8 / GEMM CU, dispatch, MoE fan) |
 | [patches/exllamav3/sm70-half-merge.patch](patches/exllamav3/sm70-half-merge.patch) | exllamav3: half-integer bitrate plumbing (subset) |
 | [patches/exllamav3/sm70-gemv-scratch-gate.patch](patches/exllamav3/sm70-gemv-scratch-gate.patch) | exllamav3: GEMV scratch sizing + dispatch gate (subset) |
+| [patches/strata/v0.1.39-split-metadata-shard.patch](patches/strata/v0.1.39-split-metadata-shard.patch) | Strata v0.1.39: validate the architecture only on a split's metadata shard |
+| [patches/strata/v0.1.39-ple-q8_0-rows.patch](patches/strata/v0.1.39-ple-q8_0-rows.patch) | Strata v0.1.39: Q8_0 PLE n-gram rows (170 B) on both readers |
 
 ## Headline results
 
@@ -58,5 +61,8 @@ Snapshot 2026-09. Decode rates without a fill depth are in-service log samples (
 | llama.cpp + MTP draft head (bench shape) | 56.84 | 47.20 |
 | llama.cpp + MTP (production shape) | 55.15 | 48.90 |
 | exllamav3, best sm_70 build | 16.15 @2k | 14.32 |
+| Strata, uncensored IQ4_XS, all-resident (fills 2.5k / 18k) | 85.3 | 81.8 |
+| Strata, GSQ IQ3_XXS, all-resident (fills 2.0k / 17k) | 77.6 | 73.9 |
+| Strata, abliterated Q8_0, 67% expert residency (fills 2.4k / 20k) | 72.5 | 66.0 |
 
-Patches retain upstream attribution; use under the upstream licenses (llama.cpp and exllamav3 are MIT-licensed). All numbers are single-machine measurements from the reference configuration, per the protocol in docs/03.
+Patches retain upstream attribution; use under the upstream licenses (llama.cpp, exllamav3 and Strata are MIT-licensed). All numbers are single-machine measurements from the reference configuration, per the protocol in docs/03.
