@@ -1,6 +1,6 @@
 # Workstation configuration tables (3 x V100, layer split)
 
-All numbers measured on the reference configuration (see README).
+All numbers from the reference configuration (see README).
 
 ## GPU device enumeration
 

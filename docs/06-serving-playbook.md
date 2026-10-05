@@ -1,13 +1,13 @@
 # Serving playbook: flags and decisions (model-agnostic)
 
-Distilled from the launchers in [doc 05](05-models.md) and measurements in this repository. Target hardware: 3 x V100 32 GB (96 GB VRAM total), dual-socket host, one model at a time per port.
+Distilled from the launchers in [doc 05](05-models.md) and results in this repository. Target hardware: 3 x V100 32 GB (96 GB VRAM total), dual-socket host, one model at a time per port.
 
 **Sections:** [1. Device selection](#1-device-selection) · [2. Attention & KV cache](#2-attention-and-kv-cache) · [3. Batch sizes](#3-batch-sizes) · [4. Context & slots](#4-context-and-slots) · [5. Speculative decoding](#5-speculative-decoding-decision-table) · [6. Reasoning flags](#6-reasoning-flags) · [7. Memory & load modes](#7-memory-and-load-modes) · [8. Ops pattern](#8-ops-pattern) · [9. Sampling presets](#9-sampling-presets-used) · [10. Vision](#10-vision-mmproj) · [11. Prefix caching](#11-prefix-caching-and-lan-clients) · [12. Glossary](#12-glossary-what-every-flag-in-the-launchers-does)
 
 ## 1. Device selection
 
 - Keep the display GPU out of compute. Pin explicitly, e.g. `CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1,2,3`; verify with `llama-server --list-devices`.
-- Layer split (`-ts 1,1,1 -sm layer`) is the default winner on PCIe-only V100s. Tensor split measured slow on 3 GPUs (allreduce crosses PCIe/inter-socket links).
+- Layer split (`-ts 1,1,1 -sm layer`) is the default winner on PCIe-only V100s. Tensor split is slow on 3 GPUs (allreduce crosses PCIe/inter-socket links).
 - Alternative: `-dev CUDA0,CUDA1,CUDA2 -devd ...` combined with `-ot <tensor pattern>=<device>` when specific tensors must land on specific GPUs (see doc 05 section 6).
 
 ## 2. Attention and KV cache
@@ -19,7 +19,7 @@ Distilled from the launchers in [doc 05](05-models.md) and measurements in this 
 ## 3. Batch sizes
 
 - Dense-ish 27-35B Q8 at np2/np3: `-b 2048 -ub 512` (VRAM-lean) up to `-ub 4096`.
-- Large-context MoE: `-ub 4096` is the measured knee for prefill on this box; prefill scales 615 -> 1118 t/s from ub 512 -> 8192 at +~11 GB/card compute scratch at ub 8192 (ladder in doc 04).
+- Large-context MoE: `-ub 4096` is the knee for prefill on this box; prefill scales 615 -> 1118 t/s from ub 512 -> 8192 at +~11 GB/card compute scratch at ub 8192 (ladder in doc 04).
 - Time-to-first-token, 49k-token prompt: 86.6 s (ub 512) -> 50.8 s (ub 4096).
 
 ## 4. Context and slots
@@ -81,9 +81,9 @@ Values come from model cards / GGUF metadata where present; launchers pass them 
 ## 11. Prefix caching and LAN clients
 
 - Prompt caching is ON by default (`--cache-prompt`); the cache is per slot and hits require a byte-stable prompt prefix (system prompt + tool schemas + history matching from position 0).
-- Instrumentation: response `timings.cache_n` = tokens served from cache, `timings.prompt_n` = tokens actually evaluated. Measured example on the reference box: identical follow-up request reused 422 / 426 tokens (wall 1.82 s -> 0.14 s).
+- Instrumentation: response `timings.cache_n` = tokens served from cache, `timings.prompt_n` = tokens actually evaluated. Example on the reference box: identical follow-up request reused 422 / 426 tokens (wall 1.82 s -> 0.14 s).
 - Prompt-cache budget: `--cache-ram` (upstream default 8192 MiB; launchers here set 65536 MiB = 64 GiB; host RAM is ~188 GiB). Idle slots park in this host-RAM cache (`--cache-idle-slots`, default on) and are restored for later tasks; a larger budget retains more prefixes across clients.
-- Eviction is size-based LRU, not a timeout: nothing expires by clock; entries drop only when new saves exceed the budget (`removing oldest entry`). At the previous 16384 MiB budget this bit continuously: saved states carry up to 32 context checkpoints per slot (~130-150 MiB each at ~20k ctx, up to 362 MiB at depth), so single entries reach multi-GB (1.1-5.5 GiB eviction events observed). Measured symptom: a resume after a 22-min pause reused only 7123/21600 tokens (~7.5k tokens re-prefilled, ~21 s), then 2-3 catch-up turns; in-flow turns on the same session reused 17-19k tokens per turn.
+- Eviction is size-based LRU, not a timeout: nothing expires by clock; entries drop only when new saves exceed the budget (`removing oldest entry`). At the previous 16384 MiB budget this bit continuously: saved states carry up to 32 context checkpoints per slot (~130-150 MiB each at ~20k ctx, up to 362 MiB at depth), so single entries reach multi-GB (1.1-5.5 GiB eviction events observed). Symptom: a resume after a 22-min pause reused only 7123/21600 tokens (~7.5k tokens re-prefilled, ~21 s), then 2-3 catch-up turns; in-flow turns on the same session reused 17-19k tokens per turn.
 - Fix deployed 2026-09-29 on all launchers: `--cache-ram 65536` plus checkpoint tuning `--ctx-checkpoints 16 --checkpoint-min-step 16384` (halves checkpoint count and creation rate; 16 x 16384 = 262144 >= the 131072 per-slot ctx).
 - `--cache-reuse` (interior-chunk reuse via KV shifting; upstream default 0): **unavailable under multimodal** -- with an mmproj loaded the server force-disables `cache_reuse` and `ctx_shift` at startup. These launchers run vision, so it stays unset; text-only runs may add `--cache-reuse 256` (value: reuse of non-prefix shared chunks, e.g. clients that truncate mid-history).
 - Context overflow: `--context-shift` is disabled by default (and under multimodal); clients manage conversation length themselves; the per-slot `-c` value is the hard budget.

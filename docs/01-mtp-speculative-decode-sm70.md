@@ -35,7 +35,7 @@ Head files:
 1. Base tree at `f3f1a8f27` (qwen4exp fork lineage).
 2. Apply `patches/llama.cpp/qwen4exp-mtp-stack.patch`.
 3. Build for sm_70 (e.g. `-DCMAKE_CUDA_ARCHITECTURES=70`), CUDA 12.x.
-4. Serve (measured configuration):
+4. Serve (reference configuration):
 
 ```
 llama-server -m <model-IQ3_XXS-00001-of-00002.gguf> --alias main
@@ -52,9 +52,9 @@ llama-server -m <model-IQ3_XXS-00001-of-00002.gguf> --alias main
 Startup notes:
 
 - On this VRAM budget the server logs `failed to allocate compute buffers -- retrying without pipeline parallelism` and then loads healthy. This is the expected fallback, not a crash.
-- Verify the head loads as 37 tensors and the log reports the draft model before measuring.
+- Verify the head loads as 37 tensors and the log reports the draft model before benchmarking.
 
-## Results (measured)
+## Results
 
 Fill = prompt tokens; ~300 generated tokens per arm; temperature 0; `ignore_eos`; fresh evaluations only (see docs/03).
 

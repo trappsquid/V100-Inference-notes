@@ -1,6 +1,6 @@
 # Hardware platform: dual-socket V100 workstation
 
-Reference system for every measurement in this repository. Values are as observed on the machine (source command noted), not spec-sheet claims.
+The reference system for the numbers in this repository. Values are as observed on the machine (source command noted), not spec-sheet claims.
 
 ## Summary
 
@@ -29,13 +29,13 @@ Reference system for every measurement in this repository. Values are as observe
 Observed facts:
 
 - GPUs 0-2 (PCI bus 02/03/04) attach to NUMA node 0; GPU3 (PCI bus A1) attaches to node 1 -- the slot wiring feeds from both sockets.
-- GPU3 <-> GPU1/2 traffic crosses the inter-socket link (SYS). With `-sm layer` the pipeline crosses sockets once per forward pass; layer split tolerates this well. Tensor-parallel allreduce across SYS/PHB measured slow (doc 06) -- layer split is the default for good reason.
+- GPU3 <-> GPU1/2 traffic crosses the inter-socket link (SYS). With `-sm layer` the pipeline crosses sockets once per forward pass; layer split tolerates this well. Tensor-parallel allreduce across SYS/PHB is slow (doc 06) -- layer split is the default for good reason.
 - Inter-node protocol distance 21 vs local 10: expect roughly half bandwidth for cross-socket transfers on this generation.
 
 ## Memory (DDR4) and inference
 
 - ~188 GiB ECC DDR4 across two sockets. Addressable per node: ~94 GiB.
-- Page cache matters: ~123 GiB observed in page cache at steady state (model pages). Repeat model loads and `--lazy-mode` tensor reads are effectively RAM-speed; cold reads from the model volume measured ~474 MB/s.
+- Page cache matters: ~123 GiB observed in page cache at steady state (model pages). Repeat model loads and `--lazy-mode` tensor reads are effectively RAM-speed; cold reads from the model volume run ~474 MB/s.
 - CPU-side MoE offload (`-ot exps=CPU`) runs at DDR4-bandwidth limits: reference numbers ~105 t/s prefill / ~16 t/s decode for DeepSeek-V4-Flash with experts on CPU (doc 05).
 - NUMA strategies exposed by llama.cpp: `--numa distribute | isolate | numactl | mirror`. Launchers here use `distribute` when CPU work is involved.
 - When CPU threads are used, keep them on one node where possible (numactl/CPU affinity options exist for the main and draft models) -- cross-socket thread migration costs more than it saves on this generation.

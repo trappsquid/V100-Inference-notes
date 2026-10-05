@@ -6,9 +6,9 @@ Deployments on this box, in order: GSQ-RCO IQ3_XXS (2026-10-04, 2- and 3-card), 
 
 Fill depths are stated with every number; protocol per doc 03. One model at a time on :8081, same as the other lanes.
 
-**Sections:** [Measured results](#measured-results) · [Serving posture](#serving-posture) · [Flag reference](#flag-reference-every-field-in-the-startup-configs) · [PLE n-gram table](#ple-n-gram-table-read-path-and-encodings) · [Negative results and limits](#negative-results-and-limits) · [Patches](#patches)
+**Sections:** [Results](#results) · [Serving posture](#serving-posture) · [Flag reference](#flag-reference-every-field-in-the-startup-configs) · [PLE n-gram table](#ple-n-gram-table-read-path-and-encodings) · [Negative results and limits](#negative-results-and-limits) · [Patches](#patches)
 
-## Measured results
+## Results
 
 | Model / quant | Expert residency | Decode @ short | Decode @ long | Prompt read | Spec accept |
 |---|---|---|---|---|---|
@@ -17,15 +17,15 @@ Fill depths are stated with every number; protocol per doc 03. One model at a ti
 | Uncensored IQ4_XS (single file) | 100% | 85.3-86.8 @2.5k | ~82 @18k | 707 -> 1,772 t/s | ~76% |
 | Abliterated Q8_0 (6 shards) | 67% (16,450) | 72.5-73.8 @2.4k | 66.0-66.2 @20k | 458 -> 1,578 t/s | 74-78% |
 
-For scale, the llama.cpp fork's production lane for the same model family on the same cards runs 55.15 t/s @2.4k fill / 48.90 @19.5k, prefill 339-425 t/s (doc 05). Strata's prompt read is 1.9-4.2x that; decode is above it at every depth measured.
+For scale, the llama.cpp fork's production lane for the same model family on the same cards runs 55.15 t/s @2.4k fill / 48.90 @19.5k, prefill 339-425 t/s (doc 05). Strata's prompt read is 1.9-4.2x that; decode is above it at every depth tested.
 
 Notes:
 
 - The Q8_0 row is the currently served file and a deliberate spill-condition test: its experts (~120 GiB) exceed the ~75 GiB 3-card budget, so the engine filled 16,450 / 24,576 expert slots (5,524 / 5,631 / 5,295 per card; ~446 MiB VRAM spare) and served the rest from disk/RAM. At the tested depths the non-resident set barely engaged -- 99.1-99.3% expert-cache hit, ~0.0% fetched over PCIe -- because the profile-ranked fill captured the hot set. The decode delta vs the all-resident IQ4_XS (-15% / -19%) is the quant's ~2x expert bytes, not spill I/O.
-- The same model under a 49%-residency cap (92.9% hit) measured 73.6 vs 85.3 t/s (-13.7%): spill cost appears only when the working set actually rotates.
+- The same model under a 49%-residency cap (92.9% hit) ran 73.6 vs 85.3 t/s (-13.7%): spill cost appears only when the working set actually rotates.
 - Both Q8_0 figures required two local engine fixes (patches/strata/): split-shard metadata validation and Q8_0 PLE rows. Stock v0.1.39 refuses both.
 - Vision: red-circle smoke, 1.3-3.4 s depending on model/load; the encoder warms at 1024 image tokens.
-- Concurrency: 2 batch slots on IQ3_XXS measured 37-41 t/s per stream (75-82 aggregate) at 100% expert-cache hit.
+- Concurrency: 2 batch slots on IQ3_XXS run 37-41 t/s per stream (75-82 aggregate) at 100% expert-cache hit.
 - Boot: ~50-60 s (IQ3_XXS, all-resident) to ~3-5 min (single-file IQ4_XS / 6-shard Q8_0, first fill). IQ3_XXS re-fill is ~4 GiB/s.
 
 ## Serving posture
@@ -57,10 +57,10 @@ Meanings from the engine's own help and docs (v0.1.39); the why behind the choic
 | `--pack <dir>` | the pack directory: the model staged by setup (weights in the engine's layout, tokenizer, per-layer tables). |
 | `--native <shard.gguf>` | load the model's own GGUF shard(s) directly and turn on the native pinned-CUDA tensor paths; for split models this is shard 1 (repeat the flag for more shards). |
 | `--ple-gguf <shard.gguf>` | the shard holding the PLE n-gram table (`per_layer_token_embd.weight`) -- usually the second shard. The engine warns that without the table layer 1's PLE is silently skipped and every number downstream changes; check the boot log reports PLE on. |
-| `--expert-profile <file>` | pre-load the VRAM expert tier from a recorded `profile.bin` (built by `tools/make_profile.py`) instead of admitting experts on first use; the ranked fill is why 67% residency still measured 99%+ hit. |
+| `--expert-profile <file>` | pre-load the VRAM expert tier from a recorded `profile.bin` (built by `tools/make_profile.py`) instead of admitting experts on first use; the ranked fill is why 67% residency still hits 99%+. |
 | `--expert-cache auto` | keep expert blobs resident in VRAM and compute their rows on the GPU; `auto` sizes the cache to each card (16,450 of 24,576 slots in the Q8 deployment; 100% in the all-resident ones). |
 | `--prefill auto` | batched prompt processing in chunks; `auto` = the largest chunk (up to 8192) whose buffers the expert cache can lend. |
-| `--spec 4` | speculation window: the MTP layer drafts up to 4 tokens per check and one full pass checks them (engine default 3; measured acceptance 74-80% here). |
+| `--spec 4` | speculation window: the MTP layer drafts up to 4 tokens per check and one full pass checks them (engine default 3; acceptance 74-80% here). |
 | `--spec-min-p 0.5` | how sure the draft layer must be to add another guess to a check (calibratable; 0.5 here). |
 | `--mtp <dir>` | the MTP draft-layer data the engine loads for speculation (the `rt` runtime form prepared by setup). |
 | `--max-context 262144` | KV/state capacity in tokens. |
@@ -84,7 +84,7 @@ Meanings from the engine's own help and docs (v0.1.39); the why behind the choic
 
 ## PLE n-gram table: read path and encodings
 
-The table (28.8-54.4 GB in the encodings seen here) is read randomly, a few rows per token, from SSD. Two questions were measured: read mode, and encoding.
+The table (28.8-54.4 GB in the encodings seen here) is read randomly, a few rows per token, from SSD. Two questions were tested: read mode, and encoding.
 
 **Read mode.** `--ple-io direct` (default) = unbuffered, row-sized reads by a dedicated I/O thread (256 outstanding reads, prefetch, SSD keep-awake). A/B on the 54.4 GB Q8_0 table:
 
@@ -95,7 +95,7 @@ The table (28.8-54.4 GB in the encodings seen here) is read randomly, a few rows
 
 mmap faults synchronously on the token thread (random rows in a file far larger than RAM): -15% to -45% decode, fills 3-4x slower. Keep `direct`. `--ple-io ram` (lock the whole table in RAM) does not fit this box for these tables: ~47 GiB free with the engine resident vs a 54.4 GB table. Not tested.
 
-**Encodings.** The reader accepts IQ4_NL (90 B/row), Q5_0 (110 B), Q8_0 (170 B) and FP8 E4M3 (160 B). Per-row relative L2 error against the checkpoint's BF16 table (the source of record; upstream measurements, PR #651): **Q8_0 0.53% / FP8 2.66% / IQ4_NL 7.59%**. A Q8_0 table is therefore the closest readable encoding, not merely the one that boots. An FP8 table measured ~+2-4% decode vs IQ4_NL on one upstream rig (PR #291) -- i.e. encoding is a fidelity choice, not a performance lever. A full-precision BF16 table (102 GB) exists upstream as a fidelity opt-in (PR #464 -> #586): its measured speed differs by +/-2% (noise).
+**Encodings.** The reader accepts IQ4_NL (90 B/row), Q5_0 (110 B), Q8_0 (170 B) and FP8 E4M3 (160 B). Per-row relative L2 error against the checkpoint's BF16 table (the source of record; upstream numbers, PR #651): **Q8_0 0.53% / FP8 2.66% / IQ4_NL 7.59%**. A Q8_0 table is therefore the closest readable encoding, not merely the one that boots. An FP8 table ran ~+2-4% decode vs IQ4_NL on one upstream rig (PR #291) -- i.e. encoding is a fidelity choice, not a performance lever. A full-precision BF16 table (102 GB) exists upstream as a fidelity opt-in (PR #464 -> #586): its speed differs by +/-2% (noise).
 
 ## Negative results and limits
 
@@ -112,4 +112,4 @@ mmap faults synchronously on the token thread (random rows in a file far larger 
 | [patches/strata/v0.1.39-split-metadata-shard.patch](../patches/strata/v0.1.39-split-metadata-shard.patch) | `NativeDense::load` validates the architecture only on the metadata shard of a split (writers may reduce later shards' metadata to `split.*` while leaving `general.architecture` in every shard) |
 | [patches/strata/v0.1.39-ple-q8_0-rows.patch](../patches/strata/v0.1.39-ple-q8_0-rows.patch) | Q8_0 PLE rows (170 B) through the existing `dequantize_q8_0` on both readers; `PLE_ROW_BYTES_MAX` 160 -> 170 |
 
-Both against v0.1.39; MIT, as the upstream engine. Upstream equivalents were in review at write time (#651 and #865 for Q8_0 tables; #864 for a resident-expert buffer rotation). Engine numbers in this doc are single-machine measurements from the reference configuration; upstream measurements are attributed by PR number.
+Both against v0.1.39; MIT, as the upstream engine. Upstream equivalents were in review at write time (#651 and #865 for Q8_0 tables; #864 for a resident-expert buffer rotation). Engine numbers in this doc are single-machine, from the reference configuration; upstream numbers are attributed by PR number.

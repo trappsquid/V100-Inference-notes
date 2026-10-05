@@ -26,7 +26,7 @@ Subsets:
 - exllamav3 fork (`sm70-upstream-candidate`); Python 3.12 venv; torch 2.10.0+cu128; CUDA 12.8.
 - 3 x Tesla V100 32 GB; same workstation as the rest of this repository.
 
-## Performance trajectory (pure decode, measured)
+## Performance trajectory (pure decode)
 
 | Step | t/s @ ~19.5k |
 |---|---|

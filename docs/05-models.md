@@ -44,7 +44,7 @@ llama-server -m <model-IQ3_XXS-00001-of-00002.gguf>
 
 - Environment: `LLAMA_ATTN_ROT_DISABLE=1` (QSA indexer requirement on this architecture); no `-ot` override (the PLE tensor is lazy-host by construction).
 
-Measured (campaign, doc 03 protocol; full arms in [doc 01](01-mtp-speculative-decode-sm70.md)):
+Results (campaign, doc 03 protocol; full arms in [doc 01](01-mtp-speculative-decode-sm70.md)):
 
 | Arm | @2.4k fill | @19.5k fill |
 |---|---|---|
@@ -90,7 +90,7 @@ Acceptance ~70-76%; mean accepted length ~3.1-3.3 probe / ~2.6 token-weighted pr
 ```
 
 - Observed in service: ~83-88 t/s decode; prefill ladder 615 -> 1118 t/s across ub 512 -> 8192 (doc 04).
-- MTP measured net-negative on this model (-22% at n_max 3; parity at n_max 1) -- left off.
+- MTP is net-negative on this model (-22% at n_max 3; parity at n_max 1) -- left off.
 
 ## 4. ThinkingCap-Qwen3.8-27B -- Q8_0 + DFlash2 draft + vision
 
@@ -172,7 +172,7 @@ A second serving stack for the same Qwen3.8-Flash-Next family, holder of :8081 s
 | Model / quant | Size | Decode | Prompt read | Notes |
 |---|---|---|---|---|
 | [Abliterated Q8_0 (6 shards)](#81-abliterated-q8_0----strata-huihui-q8_0json) | ~189 GB | 72.5 @2.4k; 66.0 @20k fill | 458 -> 1,578 | served now (spill test, 67% residency); needs [patches/strata/](../patches/strata/) |
-| [Uncensored IQ4_XS (single file)](#82-uncensored-iq4_xs----strata-orca-iq4_xsjson) | 92 GB | 85.3 @2.5k; ~82 @18k fill | 707 -> 1,772 | all-resident; fastest decode measured on this box |
+| [Uncensored IQ4_XS (single file)](#82-uncensored-iq4_xs----strata-orca-iq4_xsjson) | 92 GB | 85.3 @2.5k; ~82 @18k fill | 707 -> 1,772 | all-resident; fastest decode on this box |
 | [GSQ-RCO IQ3_XXS (2 shards)](#83-gsq-rco-iq3_xxs----strata-iq3_xxsjson) | ~107 GB | 77.6 @2.0k; 73.9 @17k fill | 656 -> 1,158 | first Strata deployment, 2026-10-04 |
 
 For scale, the llama.cpp production lane above runs 55.2 @2.4k fill / 48.9 @19.5k.
