@@ -1,6 +1,6 @@
 # Models: tested serving configurations
 
-Snapshot: 2026-09. Served one at a time on port 8081 from the reference workstation (see README); display GPU excluded via `CUDA_VISIBLE_DEVICES`; layer split across the three V100s unless noted. Flag blocks are the actual serving configurations with local paths collapsed.
+Snapshot: 2026-10. Served one at a time on port 8081 from the reference workstation (see README); display GPU excluded via `CUDA_VISIBLE_DEVICES`; layer split across the three V100s unless noted. Flag blocks are the actual serving configurations with local paths collapsed. Sections 1-7 are the llama.cpp lanes; section 8 is the Strata lane -- the current :8081 stack.
 
 Decode rates marked "(sample)" are the last completed task in that model's server log at write time -- fill depths vary; campaign numbers follow the protocol in doc 03.
 
@@ -18,7 +18,7 @@ Shared conventions: `-ngl 999` (all layers on GPU), `-ts 1,1,1` (even 3-way laye
 
 ---
 
-## 1. Qwen3.8-Flash-Next (GSQ-RCO) -- daily driver
+## 1. Qwen3.8-Flash-Next (GSQ-RCO) -- llama.cpp daily driver lane
 
 - Files: IQ3_XXS 2-shard GGUF + BF16 mmproj (~107 GB total), MTP head GGUF (Q4_K_M, ~2.5 GB; Q8_0 head ~4.1 GB for reduced-context use).
 - Engine: llama.cpp fork with qwen4exp MTP support (doc 01 / attached patch).
@@ -144,6 +144,14 @@ Acceptance ~70-76%; mean accepted length ~3.1-3.3 probe / ~2.6 token-weighted pr
 - Observed in service: ~15.9 t/s decode, ~104.9 t/s prompt processing (experts on CPU, DDR4-bandwidth-bound; see doc 00).
 - Parked -- model files relocated; launcher retained as reference.
 
-## 8. Strata lane (separate engine)
+## 8. Strata lane (separate engine) -- current :8081 stack
 
-A second serving stack for the same Qwen3.8-Flash-Next family: the Strata engine holds experts across VRAM + RAM and streams the PLE n-gram table from SSD. Best measured decode 85.3 t/s @2.5k fill (uncensored IQ4_XS, all-resident) vs 55.2 for the llama.cpp production lane above; configs, PLE n-gram findings and limits in doc 07.
+A second serving stack for the same Qwen3.8-Flash-Next family, holder of :8081 since 2026-10-04: Strata keeps experts across VRAM + RAM and streams the PLE n-gram table from SSD. Full setup, posture and PLE findings in doc 07. Deployments, newest first:
+
+| Model / quant | Size | Decode | Notes |
+|---|---|---|---|
+| Abliterated Q8_0 (6 shards) | ~189 GB | 72.5 @2.4k; 66.0 @20k fill | served now (spill test, 67% residency); needs patches/strata/ |
+| Uncensored IQ4_XS (single file) | 92 GB | 85.3 @2.5k; ~82 @18k fill | all-resident; fastest decode measured on this box |
+| GSQ-RCO IQ3_XXS (2 shards) | ~107 GB | 77.6 @2.0k; 73.9 @17k fill | first Strata deployment, 2026-10-04 |
+
+For scale, the llama.cpp production lane above runs 55.2 @2.4k fill / 48.9 @19.5k.

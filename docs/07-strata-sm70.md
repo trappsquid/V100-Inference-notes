@@ -2,6 +2,8 @@
 
 Third engine on the reference workstation, alongside the llama.cpp fork (docs 01, 05) and exllamav3 (doc 02). Strata ([Niko1221/Strata](https://github.com/Niko1221/Strata)) is a dedicated engine for Qwen3.8-Flash-Next: MoE experts live across VRAM and host RAM, and the model's 51B-parameter PLE n-gram table streams from SSD a few rows per token. OpenAI- and Anthropic-compatible APIs, an optional image encoder, and MTP speculative decode with the model's own draft head. Verified on engine **v0.1.39**; sm_70 runs via the experimental build path (`STRATA_EXPERIMENTAL_SM60=1`, CUDA 12.x -- CUDA 13 dropped Volta).
 
+Deployments on this box, in order: GSQ-RCO IQ3_XXS (2026-10-04, 2- and 3-card), uncensored IQ4_XS (2026-10-04), abliterated Q8_0 (2026-10-05, spill test -- served live at write time, vision on, 2 slots).
+
 Fill depths are stated with every number; protocol per doc 03. One model at a time on :8081, same as the other lanes.
 
 ## Measured results
@@ -17,7 +19,7 @@ For scale, the llama.cpp fork's production lane for the same model family on the
 
 Notes:
 
-- The Q8_0 row is a deliberate spill-condition test: its experts (~120 GiB) exceed the ~75 GiB 3-card budget, so the engine filled 16,450 / 24,576 expert slots (5,524 / 5,631 / 5,295 per card; ~446 MiB VRAM spare) and served the rest from disk/RAM. At the tested depths the non-resident set barely engaged -- 99.1-99.3% expert-cache hit, ~0.0% fetched over PCIe -- because the profile-ranked fill captured the hot set. The decode delta vs the all-resident IQ4_XS (-15% / -19%) is the quant's ~2x expert bytes, not spill I/O.
+- The Q8_0 row is the currently served file and a deliberate spill-condition test: its experts (~120 GiB) exceed the ~75 GiB 3-card budget, so the engine filled 16,450 / 24,576 expert slots (5,524 / 5,631 / 5,295 per card; ~446 MiB VRAM spare) and served the rest from disk/RAM. At the tested depths the non-resident set barely engaged -- 99.1-99.3% expert-cache hit, ~0.0% fetched over PCIe -- because the profile-ranked fill captured the hot set. The decode delta vs the all-resident IQ4_XS (-15% / -19%) is the quant's ~2x expert bytes, not spill I/O.
 - The same model under a 49%-residency cap (92.9% hit) measured 73.6 vs 85.3 t/s (-13.7%): spill cost appears only when the working set actually rotates.
 - Both Q8_0 figures required two local engine fixes (patches/strata/): split-shard metadata validation and Q8_0 PLE rows. Stock v0.1.39 refuses both.
 - Vision: red-circle smoke, 1.3-3.4 s depending on model/load; the encoder warms at 1024 image tokens.
@@ -72,4 +74,4 @@ mmap faults synchronously on the token thread (random rows in a file far larger 
 | [patches/strata/v0.1.39-split-metadata-shard.patch](../patches/strata/v0.1.39-split-metadata-shard.patch) | `NativeDense::load` validates the architecture only on the metadata shard of a split (writers may reduce later shards' metadata to `split.*` while leaving `general.architecture` in every shard) |
 | [patches/strata/v0.1.39-ple-q8_0-rows.patch](../patches/strata/v0.1.39-ple-q8_0-rows.patch) | Q8_0 PLE rows (170 B) through the existing `dequantize_q8_0` on both readers; `PLE_ROW_BYTES_MAX` 160 -> 170 |
 
-Both against v0.1.39; MIT, as the upstream engine. Upstream equivalents were in review at write time (#651, #865 for Q8_0 tables). Engine numbers in this doc are single-machine measurements from the reference configuration; upstream measurements are attributed by PR number.
+Both against v0.1.39; MIT, as the upstream engine. Upstream equivalents were in review at write time (#651 and #865 for Q8_0 tables; #864 for a resident-expert buffer rotation). Engine numbers in this doc are single-machine measurements from the reference configuration; upstream measurements are attributed by PR number.
