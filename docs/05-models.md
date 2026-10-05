@@ -1,6 +1,6 @@
 # Models: tested serving configurations
 
-Snapshot: 2026-10. Served one at a time on port 8081 from the reference workstation (see README); display GPU excluded via `CUDA_VISIBLE_DEVICES`; layer split across the three V100s unless noted. Flag blocks are the actual serving configurations with local paths collapsed. Sections 1-7 are the llama.cpp lanes; section 8 is the Strata lane -- the current :8081 stack.
+Snapshot: 2026-10. Served one at a time on port 8081 from the reference workstation (see README); display GPU excluded via `CUDA_VISIBLE_DEVICES`; layer split across the three V100s unless noted. Flag blocks are the actual serving configurations with local paths collapsed. Sections 1-7 are the llama.cpp lanes; section 8 is the Strata lane -- the current :8081 stack. Flag meanings: doc 06 §12 (llama.cpp) and doc 07 (Strata).
 
 Decode rates marked "(sample)" are the last completed task in that model's server log at write time -- fill depths vary; campaign numbers follow the protocol in doc 03.
 

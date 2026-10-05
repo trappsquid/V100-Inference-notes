@@ -46,6 +46,40 @@ Per-model sanitized startup configs (all three deployments, with the runner and 
 - **Environment** (both on v0.1.39 Linux): `STRATA_NO_LARGEPAGES=1` -- host-arena load otherwise crawls for 10+ min with no I/O (upstream #771). `STRATA_VERIFY_ALL_RESIDENT=0` -- required for 2-slot batch on an all-resident split; without it the first concurrent request kills the engine (upstream #776; ~5% solo-decode cost).
 - **Setup notes**: `STRATA_EXPERIMENTAL_SM60=1 ./setup.sh --check` first; build needs cmake >= 3.24 (the venv one -- a system cmake 3.22 fails), CUDA 12.8. Heavy steps run under `systemd-run --user` on this box. `--gguf-dir <dir>` reuses local GGUFs without re-downloading.
 
+## Flag reference (every field in the startup configs)
+
+Meanings from the engine's own help and docs (v0.1.39); the why behind the choices is in "Serving posture" above. The JSON fields map 1:1 onto engine flags (`serve/server.py` assembles them).
+
+| Field / flag | What it does |
+|---|---|
+| `--pack <dir>` | the pack directory: the model staged by setup (weights in the engine's layout, tokenizer, per-layer tables). |
+| `--native <shard.gguf>` | load the model's own GGUF shard(s) directly and turn on the native pinned-CUDA tensor paths; for split models this is shard 1 (repeat the flag for more shards). |
+| `--ple-gguf <shard.gguf>` | the shard holding the PLE n-gram table (`per_layer_token_embd.weight`) -- usually the second shard. The engine warns that without the table layer 1's PLE is silently skipped and every number downstream changes; check the boot log reports PLE on. |
+| `--expert-profile <file>` | pre-load the VRAM expert tier from a recorded `profile.bin` (built by `tools/make_profile.py`) instead of admitting experts on first use; the ranked fill is why 67% residency still measured 99%+ hit. |
+| `--expert-cache auto` | keep expert blobs resident in VRAM and compute their rows on the GPU; `auto` sizes the cache to each card (16,450 of 24,576 slots in the Q8 deployment; 100% in the all-resident ones). |
+| `--prefill auto` | batched prompt processing in chunks; `auto` = the largest chunk (up to 8192) whose buffers the expert cache can lend. |
+| `--spec 4` | speculation window: the MTP layer drafts up to 4 tokens per check and one full pass checks them (engine default 3; measured acceptance 74-80% here). |
+| `--spec-min-p 0.5` | how sure the draft layer must be to add another guess to a check (calibratable; 0.5 here). |
+| `--mtp <dir>` | the MTP draft-layer data the engine loads for speculation (the `rt` runtime form prepared by setup). |
+| `--max-context 262144` | KV/state capacity in tokens. |
+| `--kv int8` | KV storage: int8 codes + fp16 scale per 64 values -- half the VRAM of fp16 (engine default fp16). |
+| `--kv-resident 32768` | KV streaming: keep 32,768 cells of each QSA layer in VRAM (min 20,480) and the whole K/V in pinned RAM; the freed VRAM goes to expert slots; contexts of <= 32k tokens are not streamed at all. |
+| `--batch 2` | serve (opt-in): up to 2 requests decode together in batch slots (2..8), each slot with its own session. |
+| `--batch-groups 2` | with a layer split: the slots pipeline through the GPUs in G groups. |
+| `--trim-stage-weights` | with an explicit `--layer-split`: each GPU loads only its own layers' dense weights. |
+| `--vision` | serve takes images too; the `vision` block names the encoder binary (`strata-vision`), the `mmproj` projector and the image-token budget (`max_tokens`). |
+| `--vram-reserve-mib 700` | VRAM in MiB the engine leaves free for other programs (engine default 700). |
+| `gpu: [1,2,3]` | the cards to use -- PCI-bus order on this box; the display GPU stays out of the mask (see the device-mask rule above). |
+| `layer_split: "14,31"` | the layer index each stage starts at (`0-13 / 14-30 / 31-47`; two boundaries, three cards), picked by byte-balancing each stage's weights from the GGUF header (`22,45` for the 2-shard IQ3_XXS). Required by `--trim-stage-weights`. |
+| `fit_max_tokens: true` | shorten a `max_tokens` that does not fit the context instead of answering 400 (server flag `--fit-max-tokens`). |
+| `aliases: ["main"]` | the model name(s) the server lists and answers to -- the fleet convention is `main`. |
+| `tokenizer: <pack>/tokenizer` | the pack's tokenizer directory (falls back to a byte tokenizer if absent). |
+| `lib_dirs` | extra library search paths for the engine process (CUDA 12.8 `bin`/`lib64`). |
+| `exe` / `cwd` / `log` | the engine binary / its working directory / the serve log. |
+| `gpus_asked: true` | setup bookkeeping: the device list was chosen explicitly. |
+| env `STRATA_NO_LARGEPAGES=1` | skip host large-page setup (v0.1.39 load fix -- without it the load stalls with no I/O). |
+| env `STRATA_VERIFY_ALL_RESIDENT=0` | skip the all-resident verification that otherwise kills 2-slot batch on an all-resident split. |
+
 ## PLE n-gram table: read path and encodings
 
 The table (28.8-54.4 GB in the encodings seen here) is read randomly, a few rows per token, from SSD. Two questions were measured: read mode, and encoding.

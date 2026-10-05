@@ -88,3 +88,41 @@ Values come from model cards / GGUF metadata where present; launchers pass them 
 - Cold start: caches are empty after a restart or model swap. A fixed known prefix can be pushed with a small prewarm script after restart so the first real turn skips cold prefill.
 - Optional: `--slot-save-path` plus `/slots` API `save`/`restore` persist individual slot caches to disk (manual; not enabled here).
 - Already on everywhere: SSE keep-alive pings (`--sse-ping-interval 30`), `--metrics`, `/slots` monitoring, `return_progress` streaming, `--timeout` 3600 s.
+
+## 12. Glossary: what every flag in the launchers does
+
+One-line meanings; deeper notes in the sections above.
+
+| Flag | Meaning |
+|---|---|
+| `-m <file>` | model file (the first shard of a split model). |
+| `-md <file>` | draft model for speculative decoding. |
+| `-ngl N` / `-ngld N` | layers offloaded to GPU: main model / draft. |
+| `-ts 1,1,1` / `-sm layer` | tensor split across devices / split mode; `layer` runs whole layers per GPU. |
+| `-dev` / `-devd` | explicit device lists for the main model / draft (§1). |
+| `-c N` / `-np N` | total context / parallel slots (per-slot context = `-c / -np`). |
+| `-b N` / `-ub N` | logical batch / microbatch (`-ub` drives prompt chunking; ladder in doc 04). |
+| `-fa on` | flash attention (§2). |
+| `-ctk` / `-ctv` | KV cache data type for K / V (§2). |
+| `-t N` / `-tb N` | CPU threads / threads for batch work. |
+| `--alias main` | the model name the API lists and answers to. |
+| `--host` / `--port` | bind address and port (`0.0.0.0:8081` is the fleet convention). |
+| `--metrics` | Prometheus counters on `/metrics` (§8). |
+| `--numa distribute` | spread work across both CPU sockets' memory (§7). |
+| `--lazy-mode on` | read large tables on demand from disk instead of pinning them (§7). |
+| `--load-mode dio\|mmap\|none` | how model data is read: O_DIRECT / memory-map / assume page-cache hot (§7). |
+| `-fit off` | disable automatic VRAM fitting; size everything explicitly (§7). |
+| `--no-host` | do not place model buffers in host RAM. |
+| `--jinja` | use the chat template shipped inside the GGUF. |
+| `--chat-template-file <f>` | override the template with a file. |
+| `--reasoning ...` | thinking controls (§6). |
+| `--reasoning-budget N` / `--reasoning-budget-message` | cap thinking length / the message shown when it is hit. |
+| `--temp` / `--top-p` / `--top-k` | sampling (§9). |
+| `--repeat-penalty F` / `--n-predict N` | repetition penalty / maximum generated tokens. |
+| `-ot '<pattern>=<device>'` | force tensors onto specific devices (§1, doc 05 §6). |
+| `--mmproj <f>` / `--image-min-tokens N` | vision projector / image token budget (§10). |
+| `--spec-type <t>` | speculative stage type: `draft-mtp`, `draft-dflash,ngram-map-k`, ... (§5). |
+| `--spec-draft-n-max` / `-n-min` / `-p-min` | draft length bounds / confidence gate (§5). |
+| `--spec-draft-type-k` / `-v` | KV cache types for the draft's own cache. |
+| `-lv N` | log verbosity. |
+| env `LLAMA_ATTN_ROT_DISABLE=1` | required for the QSA indexer on this architecture. |

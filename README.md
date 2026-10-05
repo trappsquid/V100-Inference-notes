@@ -44,8 +44,8 @@ Snapshot 2026-10-05. Decode rates without a fill depth are in-service log sample
 | [docs/03-benchmarking-methodology.md](docs/03-benchmarking-methodology.md) | Measurement protocol: contamination detection, token-weighted evaluation |
 | [docs/04-workstation-config-tables.md](docs/04-workstation-config-tables.md) | Config tables: KV, micro-batch, device enumeration, expected fallbacks |
 | [docs/05-models.md](docs/05-models.md) | Per-model serving configurations (sanitized startup configs) and results |
-| [docs/06-serving-playbook.md](docs/06-serving-playbook.md) | Flag reference and decisions (model-agnostic) |
-| [docs/07-strata-sm70.md](docs/07-strata-sm70.md) | Strata engine on sm_70 (current stack): setup, measured results, PLE n-gram table findings, limits |
+| [docs/06-serving-playbook.md](docs/06-serving-playbook.md) | Flag reference and decisions; §12: flag-by-flag glossary |
+| [docs/07-strata-sm70.md](docs/07-strata-sm70.md) | Strata engine on sm_70 (current stack): setup, measured results, flag reference, PLE n-gram table findings, limits |
 
 ## Patches
 
